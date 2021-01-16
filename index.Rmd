@@ -1,5 +1,5 @@
 ---
-title: "Bri Baker"
+title: "Bri Baker "
 site: distill::distill_website
 image: "tobi.jpg"
 links:
