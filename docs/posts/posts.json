@@ -1,0 +1,19 @@
+[
+  {
+    "path": "posts/2021-02-07-welcome/",
+    "title": "welcome",
+    "description": "A basic blogpost for starters.",
+    "author": [
+      {
+        "name": "Bri Baker",
+        "url": {}
+      }
+    ],
+    "date": "2021-02-07",
+    "categories": [],
+    "contents": "\r\n\r\n\r\n\r\n",
+    "preview": {},
+    "last_modified": "2021-02-07T14:29:33-08:00",
+    "input_file": {}
+  }
+]

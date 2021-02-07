@@ -9,5 +9,9 @@ navbar:
       href: index.html
     - text: "About"
       href: about.html
+    - text: "Resume"
+      href: resume_020721.pdf
+    - text: "Blog"
+      href: blog.html
 output: distill::distill_article
 theme: postcards.css
