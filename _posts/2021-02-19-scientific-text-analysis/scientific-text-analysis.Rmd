@@ -1,0 +1,231 @@
+---
+title: "Academic Text Analysis"
+description: |
+  An exploration of text analysis utilizing an academic text on wildfire management.
+author:
+  - name: Bri Baker
+    url: {}
+date: 02-23-2021
+output:
+  distill::distill_article:
+    self_contained: false
+    toc: true
+    toc_float: true
+    code_folding: true
+    highlight: kate
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,
+                      message = FALSE,
+                      warning = FALSE)
+
+library(tidyverse)
+library(tidytext)
+library(textdata)
+library(pdftools)
+library(ggwordcloud)
+library(patchwork)
+
+```
+
+## Summary
+
+Wildfire management is a subject that is discussed with increasing frequency. Academic papers provide insights on how policy and management are viewed by the field.
+
+Here I investigate the word frequency and sentiments in the recent paper Forest Service fire management and the elusiveness of change (Schultz et al., 2019) to determine how the authors approach the subject.
+
+```{r data}
+# import text from pdf file
+schultz_2019 <- pdf_text("Schultz et al_2019_Forest Service fire management and the elusiveness of change.pdf") %>% 
+  data.frame() %>% # make df
+  rename("text_full" = ".") %>% 
+  mutate(text_full = tolower(text_full))
+
+
+schultz_tidy <- schultz_2019 %>% 
+  mutate(
+    text_full = str_remove_all(text_full, "[[:punct:]]"),  # remove punctuation
+    text_full = str_remove_all(text_full, "[[:digit:]]"),
+    text_full = str_squish(text_full), # remove interior white space
+    text_full = str_split(text_full, pattern = " ")) %>% # split into lists at space
+  unnest(text_full) %>% # make individual rows
+  rename("word" = "text_full")
+
+```
+
+
+## Word frequency
+
+When analyzing the word frequency, I removed common stop words. Additionally, I defined words that might be common in the paper but that would not give me a good sense on the ideas in the paper to use in some analyses. These words primarily consisted of the subjects of the paper (fire, management, forest service).
+
+```{r stop words}
+
+citation <- tribble(~word,
+                    "de", "la", "en", "el", "los", "del",# spanish
+                    "ment", "tion", # frequency captured by prefix
+                    "https", "org", "doi", "et", "al",
+                    "httpsdoiorg", "mp") # citations
+
+#strings to remove based on high frequency as subject of paper
+subject <- tribble(~word,
+                   "fire", "management", "managers",
+                   "forest", "service", "policy",
+                   "agency", "wildfire")
+
+schultz_nonstop <- schultz_tidy %>% 
+  anti_join(stop_words) %>% # remove general stop words
+  anti_join(citation) # remove specific unwanted words
+
+
+```
+
+The word cloud gives a sense of the most used words in the paper with "fire" as the most common word (Figure 1).
+
+```{r all words counts}
+
+schultz_counts <- schultz_nonstop %>% 
+  count(word) %>% 
+  slice(-(1:3)) # remove special character and random letters at head
+
+#slice top 100 words
+top_100_all <- schultz_counts %>% 
+  slice_max(order_by = n, n = 100)
+
+```
+
+```{r fig.cap="Word cloud depicting word frequencies in Forest Service fire management (Schultz, et al., 2019)." }
+
+ggplot(data = top_100_all, aes(label = word)) +
+  geom_text_wordcloud(aes(color = n, size = n),
+                      shape = "triangle-upright") +
+  scale_size_area(max_size = 10) +
+  scale_color_gradientn(colors = c("darkgreen","goldenrod2","firebrick"))+
+  theme_minimal()
+```
+
+
+
+When subject words are excluded the common words are primarily those that pertain to planning, highlighting that managemenent and planning is key to effecting change in Forest Service fire policy (Figure 2).
+
+```{r nonfire counts}
+# remove high frequency subject words
+schultz_nonfire <- anti_join(schultz_nonstop, subject)
+
+schultz_nonfirecounts <- schultz_nonfire %>% 
+  count(word) %>% 
+  slice(-(1:3)) # remove special character and random letters at head
+
+#slice top 10 words
+top_10_nonfire <- schultz_nonfirecounts %>% 
+  slice_max(order_by = n, n = 10)
+
+```
+
+```{r fig.cap="Common words in Forest Service fire management (Schultz, et al., 2019). When paper subjects were excluded, most common word is *wildland*."}
+
+ggplot(data = top_10_nonfire, aes(x = reorder(word, n), y = n)) +
+  geom_col(aes(fill = n)) +
+  scale_fill_gradient(high = "firebrick", low = "goldenrod2")+
+  coord_flip()+
+  labs(title = "Common words in Forest Service fire management paper",
+       y = "Times in text",
+       caption = "Bri Baker, 2021") +
+  theme_minimal()+
+  theme(
+    legend.position = "none",
+    axis.title.y = element_blank()
+  )
+
+```
+
+## Sentiment analysis
+
+I used the Afinn sentiment lexicon to determine how the authors treat the subject of fire management throughout the paper.
+
+When "fire" (coded at -2) is included, the paper has a strong negative overall sentiment. However, when "fire" is excluded, there is a neutral to positive tone to the paper, indicating that the authors may have some optimism for managment (Figure 3).
+
+```{r afinn}
+schultz_afinn_all <- schultz_nonstop %>% 
+  inner_join(get_sentiments("afinn")) %>% 
+  count(value) %>% 
+  rbind(tribble(~value, ~n,
+                      -5, 0,
+                      4, 0,
+                      5,0))
+
+schultz_afinn_nonfire <- schultz_nonfire%>% 
+  inner_join(get_sentiments("afinn")) %>% 
+  count(value) %>% 
+  rbind(tribble(~value, ~n,
+                      -5, 0,
+                      4, 0,
+                      5,0))
+
+
+
+
+```
+
+```{r , fig.cap="Afinn sentiment analysis of Forest Service fire management (Schultz, et al., 2019). There is a strong negative sentiment that likely comes from the use of the word *fire*."}
+
+all_sentiments <- ggplot(data = schultz_afinn_all, 
+                         aes(x = value, y = n)) +
+  geom_col(aes(fill = value)) +
+  scale_x_continuous(
+    breaks= seq(-5,5,1))+
+  scale_fill_gradient2(high = "palegreen4", 
+                       mid = "goldenrod2", 
+                       low = "firebrick")+
+  labs(title = "All words",
+       y = "Frequency",
+       x = "Sentiment score")+
+  theme_minimal()+
+  theme(
+    legend.position = "none",
+     )
+
+nonfire_sentiments <- ggplot(data = schultz_afinn_nonfire, 
+                             aes(x = value, y = n)) +
+  geom_col(aes(fill = value)) +
+  scale_x_continuous(
+    breaks= seq(-5,5,1))+
+  scale_fill_gradient2(high = "palegreen4", 
+                       mid = "goldenrod2", 
+                       low = "firebrick")+
+  labs(title = "Sans subject words",
+       y = "Frequency",
+       x = "Sentiment score",
+       caption = "Bri Baker, 2021") +
+  theme_minimal()+
+  theme(
+    legend.position = "none",
+     )
+all_sentiments + nonfire_sentiments
+```
+
+
+## Citations
+
+Hvitfeldt, Emil (2020). textdata: Download and Load Various Text Datasets. R package version 0.4.1. https://CRAN.R-project.org/package=textdata
+
+Le Pennec, Erwan and Slowikowski, Kamil  (2019). ggwordcloud: A Word Cloud Geom for 'ggplot2'. R package version 0.5.0.
+  https://CRAN.R-project.org/package=ggwordcloud
+
+Ooms, Jeroen (2020). pdftools: Text Extraction, Rendering and Converting of PDF Documents. R package version 2.3.1.
+  https://CRAN.R-project.org/package=pdftools
+
+Pedersen, Thomas Lin (2020). patchwork: The Composer of Plots. R package version 1.1.1.
+  https://CRAN.R-project.org/package=patchwork
+
+Schultz, C. A., Thompson, M. P., & McCaffrey, S. M. (2019). Forest Service fire management and the elusiveness of change. *Fire Ecology*, 15(1), 13. https://doi.org/10.1186/s42408-019-0028-x
+
+Silge J, Robinson D (2016). “tidytext: Text Mining
+and Analysis Using Tidy Data Principles in R.”
+_JOSS_, *1*(3). doi: 10.21105/joss.00037 (URL:
+https://doi.org/10.21105/joss.00037), <URL:
+http://dx.doi.org/10.21105/joss.00037>.
+
+Wickham et al., (2019). Welcome to the tidyverse. Journal of Open Source Software, 4(43), 1686,
+  https://doi.org/10.21105/joss.01686
+

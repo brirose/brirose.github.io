@@ -1,0 +1,134 @@
+---
+title: "Creating a Chloropleth"
+description: |
+ Spatial visualization of CA DFW Oil Spill Incidents in 2008
+author:
+  - name: Bri Baker
+    url: {}
+date: 02-23-2021
+output:
+  distill::distill_article:
+    self_contained: false
+    code_folding: true
+    highlight: kate
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,
+                      message = FALSE,
+                      warning = FALSE)
+
+library(tidyverse)
+library(here)
+library(janitor)
+library(tmap)
+library(sf)
+
+```
+
+## Summary
+
+The following are visualizations of oil spill incidents in the State of California in 2008 as tracked by the Office of Spill Prevention and Response (OSPR) Incident Tracking Database. In this database, an "incident" is defined as "a discharge or threatened discharge of petroleum or other deleterious material into the waters of the state" (Lampinen and Conway, 2009).
+
+
+
+```{r data}
+
+# read in CA oil spill data
+ca_oil <- read_sf(
+  here("_posts",
+       "2021-02-23-creating-a-chloropleth",
+       "data",
+       "Oil_Spill_Incident_Tracking"), 
+  layer = "Oil_Spill_Incident_Tracking") %>% 
+  clean_names()
+
+#st_crs(ca_oil) # check CRS
+
+# Read in the CA county data (TIGER shapefile):
+ca_counties <- read_sf(
+  here("_posts",
+       "2021-02-23-creating-a-chloropleth",
+       "data",
+       "ca_counties"), 
+  layer = "CA_Counties_TIGER2016") %>% 
+  clean_names() %>% 
+  select(name)
+
+#st_crs(ca_counties) # check CRS
+
+```
+
+
+## Interactive Map
+
+This interactive map shows both marine and inland oil spill events for California in 2008 (Figure 1).
+
+```{r interactive}
+
+tmap_mode("view") # interactive mode
+
+
+tm_shape(ca_oil)+
+  tm_basemap("Esri.WorldTopoMap")+
+  tm_dots()
+
+```
+**Figure 1.** Interactive map of 2008 California oil spill incident locations.
+
+
+
+## Inland oil spill events
+
+The following chloropleth shows only inland oil spill incidents (Figure 2).
+
+```{r inland}
+inland_spill <- ca_oil %>%
+  filter(inlandmari == "Inland") # filter only inland incidents
+
+spill_county <- ca_counties %>% 
+  st_join(inland_spill) %>% # join with counties
+  count(name) # enumerate spills per county
+
+```
+
+```{r chloropleth}
+ggplot(data = spill_county) +
+  geom_sf(aes(fill = n), color = "white", size = 0.1) +
+  scale_fill_gradientn(colors = c("lightgray","orange","red")) +
+  theme_minimal() +
+  labs(fill = "Oil spill frequency",
+       title = "Inland oil spill frequency per California county in 2008",
+       caption = "Bri Baker, 2021 \nData: Lampinen and Conway, 2009") +
+  theme_void()+
+  theme(legend.position = c(0.79, 0.76), # move legend
+        legend.background = element_rect(fill="white", 
+                                         linetype = "solid", color = "whitesmoke"))
+```
+
+**Figure 2.** Chloropleth of inland oil spill frequency per California county in 2008. Colors range from red (high frequency of spills) to grey (low frequency of spills).
+
+
+
+## Citations
+
+Firke, Sam (2020). janitor: Simple Tools for Examining and Cleaning Dirty Data. R package version 2.0.1.
+  https://CRAN.R-project.org/package=janitor
+
+Lampinen, M. & Conway, C. Oil Spill Incident Tracking [ds394] GIS Dataset. https://map.dfg.ca.gov/metadata/ds0394.html (2009).
+
+Müller, Kirill (2020). here: A Simpler Way to Find Your Files. R package version 1.0.0.
+  https://CRAN.R-project.org/package=here
+  
+Pebesma, E., 2018. Simple Features for R: Standardized Support for Spatial Vector Data. The R Journal 10 (1), 439-446,
+  https://doi.org/10.32614/RJ-2018-009
+
+Tennekes M (2018). “tmap: Thematic Maps in R.”
+_Journal of Statistical Software_, *84*(6), 1-39.
+doi: 10.18637/jss.v084.i06 (URL:
+https://doi.org/10.18637/jss.v084.i06).
+
+Wickham et al., (2019). Welcome to the tidyverse. Journal of Open Source Software, 4(43), 1686,
+  https://doi.org/10.21105/joss.01686
+
+

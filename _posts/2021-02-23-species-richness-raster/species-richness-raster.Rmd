@@ -1,0 +1,120 @@
+---
+title: "Species Richness Raster"
+description: |
+  Calculation of California cetacean species richness using rasters.
+author:
+  - name: Bri Baker
+    url: {}
+date: 02-23-2021
+output:
+  distill::distill_article:
+    self_contained: false
+    code_folding: true
+    highlight: kate
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,
+                      message = FALSE,
+                      warning = FALSE)
+library(raster)
+library(tidyverse)
+library(sf)
+library(here)
+library(rnaturalearth)
+
+```
+
+## Summary
+
+The following is a cetacean species richness map for the coastal waters of California. Richness is calculated using subsetted AquaMaps data that predicts probability of species occurrence of 35 cetacean species that can be found in the California Bight based on variables like relative environmental suitability, including species preferences for water temperature, depth, salinity, and distance to land (Kaschner et al., 2016). Map extent is 125° W to 115°W and 32°N to 38°N.  
+
+
+
+```{r cetacean data}
+
+#load data from file and convert to raster in a stack
+ca_cet <- list.files(
+  path = here("_posts",
+              "2021-02-23-species-richness-raster",
+              "data",
+              "ca_cetaceans"),
+  full.names = TRUE) %>% 
+  raster::stack()
+
+```
+
+```{r basemap}
+# make basemap of coastline in defined area
+coastline <- ne_coastline(
+  scale = 10,
+  returnclass = "sf")
+
+```
+
+```{r richness}
+# define presence/absence in tribble
+presence <- tribble(
+  ~from, ~to, ~value,
+  0, 0.6, 0,
+  0.6, 1, 1)
+
+# reclass rasters to presence/absence
+ca_cet_present <- reclassify(ca_cet, presence)
+  
+# calculate richness
+ca_cet_rich <- sum(ca_cet_present, na.rm = TRUE)
+
+```
+
+
+## Species Richness
+
+```{r map}
+# make ggplot-able
+ca_richness <- raster::rasterToPoints(ca_cet_rich) %>%
+  as.data.frame() %>% 
+  rename("richness" = "layer")
+
+# plot
+ggplot()+
+  geom_raster(data = ca_richness, 
+              aes(x = x,
+                  y = y,
+                  fill = richness)) +
+  geom_sf(data = coastline) +
+  coord_sf(xlim = c(-125, -115), 
+           ylim = c(32, 38))+
+  scale_fill_gradient(low = 'white', 
+                      high = 'cornflowerblue') +
+  labs(fill = "Richness",
+       title = "California cetacean species richness",
+       caption = "Bri Baker, 2021\nData: Kaschner et al., 2016") +
+  theme_void()+
+  theme(legend.position = c(0.68, 0.78), # move legend
+        legend.background = element_rect(fill="white", 
+                                         linetype = "solid",
+                                         color = "whitesmoke"))
+  
+
+```
+
+
+## Citations
+
+Hijmans, Robert J. (2020). raster: Geographic Data Analysis and Modeling. R package version 3.3-13.
+  https://CRAN.R-project.org/package=raster
+
+Kaschner, K., Rius-Barile, J., Kesner-Reyes, K., Garilao, C., Kullander, S., Rees, T., & Froese, R. (2016). AquaMaps: Predicted range maps for aquatic species. www.aquamaps.org
+
+Müller, Kirill (2020). here: A Simpler Way to Find Your Files. R package version 1.0.0.
+  https://CRAN.R-project.org/package=here
+
+Pebesma, E., 2018. Simple Features for R: Standardized Support for Spatial Vector Data. The R Journal 10 (1), 439-446, https://doi.org/10.32614/RJ-2018-009
+
+South, Andy (2017). rnaturalearth: World Map Data from Natural Earth. R package version 0.1.0.
+  https://CRAN.R-project.org/package=rnaturalearth
+  
+Wickham et al., (2019). Welcome to the tidyverse. Journal of Open Source Software, 4(43), 1686,
+  https://doi.org/10.21105/joss.01686
