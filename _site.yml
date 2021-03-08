@@ -4,6 +4,7 @@ description: |
   Bri Baker
 output_dir: "docs"
 navbar:
+  search: false
   right:
     - text: "Home"
       href: index.html
