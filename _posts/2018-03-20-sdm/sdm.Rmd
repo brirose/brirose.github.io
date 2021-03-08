@@ -1,7 +1,7 @@
 ---
-title: "SDM"
+title: "Species Distribution Modeling"
 description: |
-  A short description of the post.
+  Using spatial data to model the current and future predicted niches of a lowland Mexican bird species.
 author:
   - name: Bri Baker
     url: {}
@@ -17,186 +17,348 @@ output:
 
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = FALSE)
+knitr::opts_chunk$set(echo = FALSE,
+                      eval = FALSE,
+                      warning = FALSE,
+                      message = FALSE)
 
-library(ggplot2)
 library(rasterVis)
+library(tidyverse)
 library(raster)
 library(maps)
+library(here)
+library(janitor)
+
 ```
 
 ## Summary
 
+Species distribution modeling (SDM) is a spatial tool that enables us to predict past, current, and future species distributions. Here, I SDM in [Maxent](https://biodiversityinformatics.amnh.org/open_source/maxent/) to model the niche changes of a Mexican lowland bird using collections data from the [Moore Laboratory of Zoology](https://moorelab.oxy.edu/).
 
+![(Rick Bowers, 2018)](https://focusingonwildlife.com/news/wp-content/uploads/golden-cheeked-woodpecker-0027.jpg)
+
+## Background
+
+As climate changes, the ranges of both highland and lowland bird species in Mexico are expected to shift. To understand shifts in range, the current range must first be determined. This investigation utilizes distribution modeling to determine the current niche of the lowland species *Melanerpes chrysogenys*.
+
+*M. chrysogenys*, or the Golden-cheeked woodpecker, is a lowland bird species endemic to Mexico. They are non-migratory and live in partially-open areas with patches of trees, arid or semi-humid forests, and plantations (Cornell Lab of Ornithology). *M. chrysogenys* nest in cardon hecho cactus (*Pachycereus pecten-aboriginum*), found in the tropical dry forests of Mexico (McBride *et al.*, 2012). Past modeling indicates that they are most likely to make their home along the narrow strip of lowlands along Mexico's west coast (Ortega-Huerta and Townsend Peterson, 2008). SDM is expected to predict a current distribution for the species that follows the lowlands along the west coast of Mexico, consistent with the findings of Ortega-Huerta and Townsend Peterson (2008).
 
 ## Data
 
-##Open species observation data
+### Collections location data
 
-First, the data downloaded from ARCTOS need to be rearranged in order to use it in maxent. The needed form is a file with only latitude and longitude values. The extraneous data points (those without location data, and duplicates) are also edited out.
-```{r sp files}
-##M.chrysogenys (Bri)
-m.chrysogenys <- read.csv("C:\\Users\\BriRo\\OneDrive\\Documents\\Oxy\\2018 Spring Semester\\Comp Bio\\Lab 6\\mchrys_arctos.csv", header=T)
+The data I utilized are available for open source download on the ARCTOS database. To use them in Maxent, I rearranged them to include only latitude and longitude values. The observed locations of *M. chrysogenys* in Mexico are along the lowlands of the western coast (Figure 1). However, point locations of observations can not give a holistic picture of the distribution of the species which is where SDM comes in.
 
-m.chrysogenys.locs <- data.frame(Species = "Mchryso", Longitude = m.chrysogenys$DEC_LONG, Latitude = m.chrysogenys$DEC_LAT)#new object with only lat long
+```{r sp}
 
-m.chrysogenys.locs <- unique(m.chrysogenys.locs) #remove duplicate observation localities
+mchrys_locs <- read_csv(here("data/Mchriso.csv")) %>% 
+  clean_names()
+  rename("lon" = "dec_lon",
+         "lat" = "dec_lat") %>% 
+    mutate(species = "Mchriso") %>% 
+    select(lon, lat, species) %>% 
+    unique() %>% 
+    na.omit()
+  
 
+# save to use in maxent
+write_csv(m.chrysogenys, "mchrys_locs.csv")
 
-m.chrysogenys.locs <- m.chrysogenys.locs[!is.na(m.chrysogenys.locs$Longitude),] #remove observations without locality information
-
-write.csv(m.chrysogenys.locs, "mchrys_locs.csv", quote=F, row.names=F)##Save new csv file
-
-##P.Stricklandi (Mudaser)
-p.stricklandi <- read.csv("C:\\Users\\BriRo\\OneDrive\\Documents\\Oxy\\2018 Spring Semester\\Comp Bio\\Lab 6\\pstricklandi_arctos.csv", header=T)
-
-p.stricklandi.locs <- data.frame(Species = p.stricklandi$SCIENTIFIC_NAME, Longitude = p.stricklandi$DEC_LONG, Latitude = p.stricklandi$DEC_LAT)#new object with only lat long
-
-p.stricklandi.locs <- unique(p.stricklandi.locs) #remove duplicate observation localities
-
-
-p.stricklandi.locs <- p.stricklandi.locs[!is.na(p.stricklandi.locs$Longitude),] #remove observations without locality information
-
-write.csv(p.stricklandi.locs, "pstrick_locs.csv", quote=F, row.names=F)##Save new csv file
-```
-
-
-##Download Political Boundaries
-
-Since the focus area is Mexico, the political boundaris are needed.
-```{r political}
+# political boundaries
 world <- map_data("world")
+
 ```
 
 
-##Map of observation localities
 
-Next, the localities of each observation will be plotted on a map to visualize the distribution.
-
-```{r map1}
-map_m.chrysogenys <- ggplot()+
-  geom_polygon(data=world, aes(x=long, y=lat, group=group), color='grey40', fill='transparent', size=0.25)+
-  geom_point(data=m.chrysogenys.locs, aes(x=Longitude, y=Latitude), size = 2, alpha =0.75) +
-  theme_bw()+
-  coord_fixed(xlim = c(-120, -85),  ylim = c(10, 33), ratio = 1.3)
-
-map_m.chrysogenys
-```
-
-**Figure 1.** Observed locations of *M. chrysogenys* in Mexico. Black circles incicate observation locations.
-```{r save1}
-ggsave("m.chrysogenys.locs.jpg", height=5, width=7, units="in", dpi=600)
-```
-
-The observed locations of *M. chrysogenys* in Mexico, based on specimens from the Moore Lab of Zoology, are along the lowlands of the western coast (Figure 1). However, point locations of observations can not give a holistic picture of the distribution of the species. SDM is useful in predicting species distribution.
-
-
-##Download and open environmental data
-
-Predictor variables for the global area of the map extent are necessary to utilize SDM. The Bioclim environmental variables are a useful set of 19 predictor variables. Below are maps visualizing two of them in Mexico: precipitation seasonality (Figure 2) and mean annual temperature (Figure 3).
-```{r env}
-predictors.files <- list.files("C:\\Users\\BriRo\\OneDrive\\Documents\\Oxy\\2018 Spring Semester\\Comp Bio\\Lab 6\\environmental_data\\Data Layers\\", pattern = ".asc") #download
-
-predictors <- stack(paste0("C:\\Users\\BriRo\\OneDrive\\Documents\\Oxy\\2018 Spring Semester\\Comp Bio\\Lab 6\\environmental_data\\Data Layers\\", predictors.files)) #stack layers
-
-##MAP_15
-map_15 <- gplot(predictors[["bio_15"]], maxpixels = 100000) + #change maxpixels for coarser scale
-  geom_tile(aes(fill = value))+
-  scale_fill_gradientn(colors =c('white', 'purple', "dodgerblue", 'turquoise', 'limegreen', 'yellow', 'orange', 'red'), na.value='transparent') + 
-  geom_polygon(data=world, aes(x=long, y=lat, group=group), color='grey40', fill='transparent', size=0.25)+
-  geom_point(data=m.chrysogenys.locs, aes(x=Longitude, y=Latitude), shape=1, size = 3, color="black") +
+```{r obs map}
+ggplot()+
+  geom_polygon(data = world, 
+               aes(x = long, y = lat, group = group), 
+               color = 'grey40', 
+               fill = 'transparent', size = 0.25) +
+  geom_point(data = mchrys_locs,
+             aes(x = long, y = lat), 
+             size = 2, alpha = 0.75) +
   theme_void()+
-  coord_fixed(xlim = c(-120, -85),  ylim = c(10, 33), ratio = 1.3)
-
-map_15
+  coord_fixed(xlim = c(-120, -85),  
+              ylim = c(10, 33), 
+              ratio = 1.3)
 ```
 
-**Figure 2.**Map of precipitation seasonality of Mexico and the Southwestern United States. Precipitation seaonality is one of a set of abiotic predictors of *M. chrysogenys* distribution. Warmer colors indicate higher rainfall. Black circles incicate observation locations.
-```{r save2}
-ggsave("m.chrysogenys_bio15.jpg", height=5, width=7, units="in", dpi=600)
+
+![**Figure 1.** Observed locations of *M. chrysogenys* in Mexico. Black dots indicate observation locations.](obs_map.jpg)
+
+
+### Environmental data
+
+Predictor variables for area of the map extent are necessary to utilize SDM. I used the Bioclim environmental variables are a useful set of 19 predictors including precipitation seasonality, temperature, and rainfall. Below are maps visualizing precipitation seasonality (Figure 2) and mean annual temperature (Figure 3) in Mexico.
+
+```{r env}
+
+predictors <- list.files(here("data/bioclim"),
+                         full.names = TRUE,
+                         pattern = ".asc") %>% 
+  raster::stack()
+
+env_color <- c('white', 'purple', "dodgerblue", 
+               'turquoise', 'limegreen', 'yellow', 
+               'orange', 'red')
+
 ```
+
+```{r precip}
+##MAP_15
+gplot(predictors[["bio_15"]], maxpixels = 100000) +
+  geom_tile(aes(fill = value))+
+  scale_fill_gradientn(colors = env_color,
+                       na.value ='transparent',
+                       name = "Precipitaion\nseasonality")+ 
+  geom_polygon(data = world, 
+               aes(x = long, y = lat, group = group),
+               color = 'grey40', fill = 'transparent', 
+               size = 0.25)+
+  geom_point(data = mchrys_locs,
+             aes(x = long, y = lat),
+             shape = 1, size = 3, 
+             color = "black") +
+  theme_void()+
+  coord_fixed(xlim = c(-120, -85),  
+              ylim = c(10, 33),
+              ratio = 1.3)+
+  theme(legend.position = c(0.85, 0.75),
+        legend.background = element_rect(fill="white",
+                                         color = "white"),
+        legend.title.align = 0.5)
+
+```
+
+![**Figure 2.** Map of precipitation seasonality in Mexico and the Southwestern United States. Precipitation seasonality is one of a set of abiotic predictors of *M. chrysogenys* distribution. Warmer colors indicate higher rainfall. Black circles indicate observation locations.](mchriso_precip.jpg)
+
+
 
 ```{r mat}
-##MAP_mat
-map_mat <- gplot(predictors[["bio_1"]], maxpixels = 100000) + #change maxpixels for coarser scale
+## Mean annual temperature
+
+gplot(predictors[["bio_1"]], maxpixels = 100000) +
   geom_tile(aes(fill = value))+
-  scale_fill_gradientn(colors =c('white', 'purple', "dodgerblue", 'turquoise', 'limegreen', 'yellow', 'orange', 'red'), na.value='transparent') + 
-  geom_polygon(data=world, aes(x=long, y=lat, group=group), color='grey40', fill='transparent', size=0.25)+
-  geom_point(data=m.chrysogenys.locs, aes(x=Longitude, y=Latitude), shape=1, size = 3, color="black") +
+  scale_fill_gradientn(colors = env_color,
+                       na.value ='transparent',
+                       name = "Mean annual\ntemperature\nindex")+ 
+  geom_polygon(data = world, 
+               aes(x = long, y = lat, group = group),
+               color = 'grey40', fill = 'transparent', 
+               size = 0.25)+
+  geom_point(data = mchrys_locs,
+             aes(x = long, y = lat),
+             shape = 1, size = 3, 
+             color = "black") +
   theme_void()+
-  coord_fixed(xlim = c(-120, -85),  ylim = c(10, 33), ratio = 1.3)
+  coord_fixed(xlim = c(-120, -85),  
+              ylim = c(10, 33),
+              ratio = 1.3)+
+  theme(legend.position = c(0.85, 0.75),
+        legend.background = element_rect(fill="white",
+                                         color = "white"),
+        legend.title.align = 0.5)
 
-map_mat
 ```
 
-**Figure 3.**Map of mean annual temperature in degrees Celcius of Mexico and the Southwestern United States. Mean annual temperature is one of a set of abiotic predictors of *M. chrysogenys* distribution. Warmer colors indicate warmer temperatures and the scale of the key is multiplied by 10. Black circles incicate observation locations.
-```{r save3}
-ggsave("m.chrysogenys_bio1.jpg", height=5, width=7, units="in", dpi=600)
-```
+![**Figure 3.** Map of mean annual temperature in degrees Celsius of Mexico and the Southwestern United States. Mean annual temperature is one of a set of abiotic predictors of *M. chrysogenys* distribution. Warmer colors indicate warmer temperatures and the scale of the key is multiplied by 10. Black circles indicate observation locations.](mchriso_mat.jpg)
 
+I extracted predictor variables at each observation location. It is not useful to include highly correlated variables, so I ran a pairwise comparison and pared the bioclim variables down manually based on the Pearson r correlation. 
 
-##Extract environmental data and test for correlation
-
-To determine what the value of each predictor variable at every location, they will be extracted. Since it is not useful to include highly correlated variables, a pairwise comparison will be run. Then the bioclim variables will be paired down based on the Pearson r correlation. 
 ```{r extract}
-#extract.data <- extract(predictors, m.chrysogenys.locs[,2:3]) #uses only columns 2 & 3 of the Species1.locs file (longitude & latitude)
+extract.data <- extract(predictors, m.chrysogenys.locs[,1:2]) # extract lat long
 
-##Combine the observation data with the extracted data to see the full dataset
-#Species.data <- cbind(m.chrysogenys.locs, extract.data)
-#View(Species.data)
+# Combine the observation data with the extracted data to see the full dataset
+sp_data <- cbind(m.chrysogenys.locs, extract.data)
 
-##Calculate correaltions among variables
-#library(Hmisc)
-#test.correlations <- rcorr(extract.data)
-#test.correlations.out <- data.frame(test.correlations$r)
-#write.csv(test.correlations.out, "correlations_mchrys.csv", quote=F)
+# calculate correlations and save for Maxent
+
+test.correlations <- rcorr(extract.data)
+test.correlations.out <- data.frame(test.correlations$r)
+write_csv(test.correlations.out, "correlations_mchrys.csv", quote=F)
+
 ```
 
-##Open SMD and visualize 
+## Spatial distribution model
 
-Maxent will used to make a distribution model based on the bioclim variables chosen (1, 2, 4, 5, 7, 8, 12, 14, 15, 17, 18, 19). Mapping the SMD as a gradient allows a visulization of the predicted niches of *M. chrysogenys* in Mexico.
+I input the data aggregated and cleaned above into Maxent to make a distribution model based on the bioclim variables I chose (1, 2, 4, 5, 7, 8, 12, 14, 15, 17, 18, 19). The predicted distribution of *M. chrysogenys* is in lowland areas along the western coast of Mexico. Their range appears to be restricted to the coastline (Figure 4).
 
 ```{r model}
-mchrys.SDM <- raster("Mchryso.asc")
+mchrys_SDM <- raster(here("_posts/2018-03-20-sdm/data/Mchryso.asc"))
 
-##Plot your SDM with country outlines and observation localities
-map_model <- gplot(mchrys.SDM, maxpixels = 100000)
-  geom_tile(aes(fill = value))+
-  scale_fill_gradientn(colors =c('white', 'purple', "dodgerblue", 'turquoise', 'limegreen', 'yellow', 'orange', 'red'), na.value='transparent') + 
-  geom_polygon(data=world, aes(x=long, y=lat, group=group), color='grey40', fill='transparent', size=0.25)+
+# Plot SDM 
+gplot(mchrys_SDM, maxpixels = 100000) +
+  geom_tile(aes(fill = value)) +
+  scale_fill_gradientn(colors = env_color,
+                       na.value ='transparent',
+                       name = "Suitability\nof habitat") + 
+  geom_polygon(data = world, 
+               aes(x = long, y = lat, group = group),
+               color = 'grey40', fill = 'transparent', 
+               size = 0.25) +
   theme_void()+
-  coord_fixed(xlim = c(-120, -85),  ylim = c(10, 33), ratio = 1.3)
+  coord_fixed(xlim = c(-120, -85),  
+              ylim = c(10, 33), 
+              ratio = 1.3) +
+    theme(legend.position = c(0.15, 0.35),
+        legend.background = element_rect(fill="white",
+                                         color = "white"),
+        legend.title.align = 0.5)
 
-map_model
 ```
 
-**Figure 4.** Predicted niches of *M. chrysogenys* in Mexico. Warmer colors indicate areas with better predicted conditions for *M. chrysogenys.* Black circles incicate observation locations.
-```{r save4}
-ggsave("m.chrysogenys_SDM.jpg", height=5, width=7, units="in", dpi=600)
+![**Figure 4.** Predicted niches of *M. chrysogenys* in Mexico. Warmer colors indicate areas with better predicted conditions for *M. chrysogenys.* Black circles indicate observation locations.](mchrys_SDM.jpg)
+
+
+
+The model for *M. chrysogenys* performed well, with a training AUC of 0.99 and a test AUC of 0.9. The variables that contributed the most to the model were precipitation seasonality (bio15) at 43%, mean annual temperature (bio1) at 18.2%, and annual precipitation (bio12) at 16.1%. 
+
+The model is consistent with predictions of *M. chrysogenys* distribution. Since the AUC values are high, we can expect that the predicted lowland distribution of *M. chrysogenys* is reliable. The assessment of the current distributions of *M. chrysogenys* sets a basis from which further analysis of the species can be made. New population can be found based on predicted distributions. Importantly, the current SDMs for *M. chrysogenys* serves as a base-line for predictions  about how climate change may alter their distribution. 
+
+### Proportion of suitable habitat
+
+```{r current suitable}
+
+# Quantify suitable habitat with cutoff at >0.5
+
+all_cells <- reclassify(mchrys_SDM, 
+                        c(-Inf, Inf, 1)) %>%  #reclass to binary
+  cellStats(sum) # count
+
+suitable_cells <- reclassify(mchrys_SDM, 
+                             c(0.5, Inf, 1, 
+                               -Inf, 0.5, NA)) %>%  #reclass habitat (>0.5) 
+  cellStats(sum) # count
+
+
+current_suitable <- suitable_cells/all_cells
+
 ```
 
-The predicted distribution of *M. chrysogenys* is in lowland areas along the western coast of Mexico. Their range appears to be restricted to the coastline (Figure 4).
+
+The proportion of current suitable habitat relative to all possible habitat in the map extent is 0.02.
 
 
-##Conclusion
+## Future projections
 
-The model for *M. chrysogenys* performed well, with a training AUC of 0.9875 and a test AUC of 0.9758, indcating that the model overwhelmingy correclty predicted the niches. The variables that contributed the most to the model were precipitation seasonality (bio15) at 43%, mean annual temperature (bio1) at 18.2%, and annual precipitation (bio12) at 16.1%. 
-
-The *P. stricklandi* SDM also performed well. It has AUC values of of 0.984 and 1.00 for the training and test datasets, respectively. The AUC value of 1.00 for the test dataset indicates that the SDM performed very well in predicting the distribution of the *P. stricklandi* across Mexico's highlands. For the *P. stricklandi* model, the variables that contributed the most were temperature seasonality (bio4), accounting for 59.9%, and mean annual temperature (bio1), with a percent contribution 32.5%.
-
-Both models are consistent with the predictions made about the distributions of *M. chrysogenys* and *P. stricklandi*. Since the AUC values are high, we can expect that the predicted lowland distribution of *M. chrysogenys* and highland distribution of *P. stricklandi* are reliable. Although the important variables for each model differ, both are reliant on mean annual temperature. This reliance indicates that the abiotic variable of mean abiotic temperature may be important to the way that the birds function within their respective environments. The influence may be direct or indirect.
-
-The assessment of the current distributions of *M. chrysogenys* and *P. stricklandi* sets a basis from which further analysis of the species can be made. New population can be found based on predicted distributions. Importantly, the current SDMs for *M. chrysogenys* and *P. stricklandi* will serve as a base-line that will allow for predictions to be made about how their climate change may alter their distributions. 
+To determine the future distribution shift as the climate changes I modeled the year 2050 using CCSM4 on the 2.6 and 8.5 representative concentration pathways (RCP) (Grant et al., 2011). In the conservative model (Figure 5), the range expands moderately into the lowlands in all directions. Similarly, the liberal model (Figure 6) the distribution of *M. chrysogenys* expands in all directions, although it is limited to the East by the mountains.
 
 
-#Bibliography
+```{r conservative}
+m_26 <- raster(here("data/2.6/Mchryso_Data Layers GCM_26.asc"))
+
+gplot(m_26, maxpixels = 100000) +
+  geom_tile(aes(fill = value)) +
+  scale_fill_gradientn(colors = env_color,
+                       na.value ='transparent',
+                       name = "Suitability\nof habitat")+ 
+  geom_polygon(data = world, 
+               aes(x = long, y = lat, group = group),
+               color = 'grey40', fill = 'transparent', 
+               size = 0.25) +
+  theme_void()+
+  coord_fixed(xlim = c(-120, -85),  
+              ylim = c(10, 33), 
+              ratio = 1.3)+
+    theme(legend.position = c(0.15, 0.35), 
+        legend.background = element_rect(fill="white",
+                                         color = "white"),
+        legend.title.align = 0.5)
+
+
+```
+
+![**Figure 5.** Conservative future species distribution of *M. chrysogenys* in Mexico using an RCP of 2.6. Warmer colors indicate areas with better predicted conditions for *M. chrysogenys.*](mchrys_26.jpg)
+
+```{r liberal}
+
+m_85 <- raster(here("data/8.5/Mchryso_Data Layers GCM_85.asc"))
+
+gplot(m_85, maxpixels = 100000) +
+  geom_tile(aes(fill = value)) +
+  scale_fill_gradientn(colors = env_color,
+                       na.value ='transparent',
+                       name = "Suitability\nof habitat")+ 
+  geom_polygon(data = world, 
+               aes(x = long, y = lat, group = group),
+               color = 'grey40', fill = 'transparent', 
+               size = 0.25) +
+  theme_void()+
+  coord_fixed(xlim = c(-120, -85),  
+              ylim = c(10, 33), 
+              ratio = 1.3) +
+    theme(legend.position = c(0.15, 0.35), 
+        legend.background = element_rect(fill="white",
+                                         color = "white"),
+        legend.title.align = 0.5)
+
+```
+
+![**Figure 6.** Liberal future species distribution of *M. chrysogenys* in Mexico using an RCP of 8.5. Warmer colors indicate areas with better predicted conditions for *M. chrysogenys.*](mchrys_85.jpg)
+
+
+### Proportion of suitable habitat
+
+I assumed that suitable habitat received an SDM score of 0.5 or greater, so I used that value as a cutoff to determine the *proportion of suitable habitat* available for future models.
+
+```{r future suitable}
+
+future_sdm <- stack(m_26, m_85) %>% # stack
+  crop(y = mchrys_SDM) # match extent
+
+# initialize storage df
+
+hab_change <- tribble(~name, ~suitable_hab, ~change, ~percent_change)
+
+# for loop to calculate habitat changes
+
+for (i in 1:2){
+  
+  all_cells <- reclassify(future_sdm[[i]], 
+                        c(-Inf, Inf, 1)) %>%  #reclass to binary
+  cellStats(sum) # count
+
+suitable_cells <- reclassify(future_sdm[[i]], 
+                             c(0.5, Inf, 1, 
+                               -Inf, 0.5, NA)) %>%  #reclass habitat (>0.5) 
+  cellStats(sum) # count
+
+  
+suitable_hab <- suitable_cells/all_cells # calc suitable habitat
+
+change <- (suitable_hab/current_suitable) - 1 # calc change
+
+percent_change = change * 100 #calc %change
+
+name <- names(future_sdm[[i]])
+
+suitable <- tibble(name, suitable_hab, change, percent_change)
+
+hab_change <- rbind(hab_change, suitable) # store
+
+}
+
+```
+
+The suitable proportion of habitat in the conservative model (RCP 2.6) is 0.026 with a change of 27.34%. in contrast, the suitable habitat proportion in the liberal model (RCP 8.5) is 0.034 with a change of 63.29%.
+
+# Citations
 
 Cornell Lab of Ornithology. Golden-cheeked Woodpecker (Melanerpes chrysogenys). *Neotropical Birds Online.* https://neotropical.birds.cornell.edu/Species-Account/nb/species/gocwoo1.
 
-Cornell Lab of Ornithology. Strickland's Woodpecker (Picoides stricklandi). *Neotropical Birds Online.* https://neotropical.birds.cornell.edu/Species-Account/nb/species/strwoo.
+Fick, S.E. and R.J. Hijmans (2017). Worldclim 2: New 1-km spatial resolution climate surfaces for global land areas. International Journal of Climatology.
 
-Flesch, Aaron. 2005. Distribution of Birds and Plants at the Western and Southern Edges of the Madrean Sky Islands in Sonora, Mexico. *USDA Proceedings.* https://www.researchgate.net/publication/251231068_Distribution_of_Birds_and_Plants_at_the_Western_and_Southern_Edges_of_the_Madrean_Sky_Islands_in_Sonora_Mexico.
+Flesch, Aaron (2005). Distribution of Birds and Plants at the Western and Southern Edges of the Madrean Sky Islands in Sonora, Mexico. *USDA Proceedings.* https://www.researchgate.net/publication/251231068_Distribution_of_Birds_and_Plants_at_the_Western_and_Southern_Edges_of_the_Madrean_Sky_Islands_in_Sonora_Mexico.
 
-McBride, Amara, Leis Meyers and Greg Moeller. 2012. Cavity Nests in Cacti: Influences of Geology and Microclimate in a Tropical Dry Forest in Mexico. *Symposium Of University Research and Creative Expression.* 86. 
+Gent, Peter, et al. (2011). The Community Climate System Model Version 4. *Journal of Climate,* 24, 19: 4973–4991. 
 
-Ortega-Huerta, Muguel A. and A. Townsend Peterson. 2008. Modeling ecological niches and predicting geographic distributions: a test of six presence-only methods. *Revista Mexicana de Biodiversidad,* 79: 205- 216.
+McCormack J (2018). MLZ Bird Collection (Arctos). Version 33.48. Moore Laboratory of Zoology. Occurrence dataset https://doi.org/10.15468/1w791r accessed via GBIF.org on 2018-03-15.
+
+McBride, Amara, Leis Meyers and Greg Moeller (2012). Cavity Nests in Cacti: Influences of Geology and Microclimate in a Tropical Dry Forest in Mexico. *Symposium Of University Research and Creative Expression.* 86. 
+
+Ortega-Huerta, Muguel A. and A. Townsend Peterson (2008). Modeling ecological niches and predicting geographic distributions: a test of six presence-only methods. *Revista Mexicana de Biodiversidad,* 79: 205- 216.
+
+Phillips, Steven J. , Miroslav Dudík, Robert E. Schapire. [Internet] Maxent software for modeling species niches and distributions (Version 3.4.1). Available from url: http://biodiversityinformatics.amnh.org/open_source/maxent/. Accessed on 03/12/2018.
