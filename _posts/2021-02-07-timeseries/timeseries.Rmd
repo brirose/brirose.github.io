@@ -1,0 +1,227 @@
+---
+title: "Timeseries"
+description: |
+  Willamette Falls fish passage time series summary.
+author:
+  - name: Bri Baker
+    url: {}
+date: 02-07-2021
+output:
+  distill::distill_article:
+    toc: true
+    toc_float: true
+    code_folding: true
+    highlight: kate
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+library(tidyverse)
+library(here)
+library(janitor)
+library(lubridate) # date manipulation
+library(tsibble) #time series table
+library(feasts) # seasonplot
+library(maps)
+library(sf)
+library(rnaturalearth)
+library(rnaturalearthdata)
+library(rgeos) #for worlds polygon 
+library(colorRamps)
+```
+
+## Overview
+
+As part of a class project, I worked with Jaleise Hall, Minnie Ringland to create time series of salmon at Willamette Falls.
+
+![Salmon leaping at Willamette Falls from NOAA's Historic Fisheries Collection. Unknown photographer, 27 June 1950.](https://upload.wikimedia.org/wikipedia/commons/c/cb/Salmon_leaping_at_Willamette_Falls.jpg)
+
+Hydroelectric power represents an important renewable and low-emissions energy source, but the construction and development of the water source that the power plants can require sometimes threatens resident fish populations. Willamette Falls, located outside of Portland in northwestern Oregon (see map below), is an important traditional Native American fishing ground. To protect this natural resource and aid the passage of salmon and steelhead runs over the falls, fishways have been constructed and updated over time. Daily fish counts are monitored to ensure that migration of these fish populations continues to be unhindered by the power plant and the falls. This report summarizes findings from studying Willamette Falls monitoring data from 2001 to 2010.
+
+
+Data were shared by and accessed from [Columbia River DART](http://www.cbr.washington.edu/dart/overview):  
+Columbia River DART (Data Access in Real Time), Columbia Basin Research, University of Washington  
+Accessed Feb 1, 2021 at [http://www.cbr.washington.edu/dart/query/adult_graph_text](http://www.cbr.washington.edu/dart/query/adult_graph_text).
+
+
+```{r map, fig.cap="Map indicating location of Willamette Falls in Oregon."}
+world <- ne_countries(scale = "medium", 
+                      returnclass = "sf") # pull world data
+states <- st_as_sf(map("state", 
+                       plot = FALSE, 
+                       fill = TRUE)) # pull state data
+states <- cbind(states, st_coordinates(st_centroid(states))) # project
+
+falls <- data.frame(longitude = c(-122.61763), 
+                    latitude = c(45.35239)) %>% # make point
+  st_as_sf(coords = c("longitude", "latitude"), # as sf
+           crs = 4326, 
+           agr = "constant")
+
+ggplot(data = world) + # plot
+  geom_sf(fill = "antiquewhite") +
+  geom_sf(data = states, 
+          fill = "peachpuff3") + # add state outlines and fill
+  geom_sf(data = falls, 
+          size = 4, 
+          shape = 23, 
+          fill = "royalblue3") + # add falls loc
+  coord_sf(xlim = c(-125, -110), 
+           ylim = c(40, 50), 
+           expand = FALSE) + # set bounding
+  theme_minimal() + # minimal theme
+  labs(title = "Willamette Falls location", # add labs
+       caption = "Bri Baker, 2021")
+
+```
+
+
+```{r data import}
+
+willamette_salmon <- read_csv(here("_posts", "2021-02-07-timeseries","data", "willamette_fish_passage.csv")) %>%  # read in data
+  clean_names() %>% # names in tidy format
+  select(date, coho, jack_coho, steelhead) %>% # select desired species
+  mutate(date = mdy(date)) %>%  # make date class
+   as_tsibble(key = NULL, 
+              index = date) # convert to tsibble
+
+salmon_longer <- willamette_salmon %>%  
+  replace(is.na(.), 0) %>%  # replace na with 0
+  rename(Coho = coho,
+         "Jack Coho" = jack_coho,
+         Steelhead = steelhead) %>% # nicer-looking names for graphing
+  pivot_longer(Coho:Steelhead, # consolidate species to one column
+               names_to = "species",
+               values_to = "counts")
+
+```
+
+### Original time series
+
+```{r fig.cap="Timeseries showing Coho (green), Jack Coho (blue), and Steelhead (yellow) salmon counts at Willamette Falls from 2001 to 2010. Seasonal and specific variation is apparent."}
+
+ggplot(salmon_longer, aes(x = date,
+                          y = counts, 
+                          color = species)) + # make ggplot
+  geom_line() + #as a lineplot
+  labs(x = "Year", # add labs
+       y = "Count",
+       title = "Salmon counts at Willamette Falls fish passage",
+       subtitle = "2001 - 2010",
+       caption = "Bri Baker, 2021\nSource: Columbia River DART",
+       color = "Species") +
+  scale_color_manual(values = c("aquamarine3", "cornflowerblue", "goldenrod1")) + # change colors
+  scale_x_date(date_breaks = "1 year", # show all years
+               date_labels = "%Y") +
+  theme_minimal() + # use theme_minimal
+  theme(legend.position = c(0.15, 0.75), # move legend
+        legend.background = element_rect(fill="white", 
+                                         linetype = "solid",
+                                         color = "whitesmoke"), # format legend
+        axis.text.x = element_text(angle = 30,
+                                   vjust = 1, 
+                                   hjust = 1)) # angle x labels
+
+```
+
+
+#### Takeaways
+
+* The most apparent pattern in the data is seasonality on an annual basis, with peak sightings occurring mid-year.
+* The bulk of Steelhead movement occurs earlier in the year than that of Coho and Jack Coho.
+* Coho increased in abundance over the time studied, particularly in 2009 and 2010.
+
+
+### Seasonplots 
+
+```{r fig.cap= "This plot shows the monthly averaged seasonal salmon counts for each of the salmon species observed at Willamette Falls Fish. Colored lines represent the different years of observation between 2001 - 2010."}
+salmon_season <- salmon_longer %>% 
+  index_by(yy_mm = ~yearmonth(.)) %>% 
+  group_by(species) %>% 
+  summarize(monthly_mean_counts = mean(counts, 
+                                       na.rm = TRUE)) # get monthly averages by species
+
+salmon_season %>% 
+  gg_season(monthly_mean_counts) +
+  scale_color_gradient2(labels = seq(2000, 2010, 1),
+                        breaks = seq(0,10,1),
+                        low = "goldenrod1", 
+                        mid = "aquamarine3", 
+                        high = "cornflowerblue",
+                        midpoint = 5)+
+  labs(title = "Mean Seasonal Salmon Counts at Willamette Falls Fish Passage",
+       y = "Average Counts",
+       x = "",
+       subtitle = "2001 - 2010",
+       caption = "Jaleise Hall, 2021\nSource: Columbia River DART") +
+  theme_minimal()
+  
+
+```
+
+
+```{r fig.cap= "The plot takes the monthly averaged seasonal salmon counts and separates them by month to show individual trends occuring for a single month by the corresponding species."}
+salmon_season %>% 
+  gg_subseries(monthly_mean_counts) +
+  labs(title = "Mean Montly Seasonal Salmon Counts at Willamette Falls Fish \nPassage",
+       y = "",
+       x = "",
+       subtitle = "2001 - 2010",
+       caption = "Jaleise Hall, 2021\nSource: Columbia River DART") +
+  scale_x_yearmonth(date_labels = "20%y", # %y only add the last two digits of the year. 
+                  date_breaks = "3 years") # show every 3 years to look cleaner
+  #NOTE: I did not add theme_minimal() to the subseries plot as it makes the plot look a bit messy in my opinion
+
+```
+
+
+#### Takeaways
+
+* Both the seasonplot and subseries plot make the seasonal difference in peak sightings for each species apparent. As gathered from the original time series, Steelheads are observed year round, but peak in early summer (July). Conversely, Coho and Jack Coho are not frequently observed until their peak in the fall (Aug - Nov).
+* There is a decreasing trend in Steelhead abundance from 2001 - 2010. While there is increased abundance of Jack Coho and Coho salmon, the changes in abundance seem random as opposed to following a clear trend.
+* Average peak counts of salmon are much higher for Steelhead and Coho than for Jack Coho.
+
+
+### Annual counts by species
+
+```{r fig.cap="Annual timeseries showing Coho (green), Jack Coho (blue), and Steelhead (yellow) salmon counts at Willamette Falls from 2001 to 2010."}
+
+# Using Bri's "pivot_longer-ed" df:
+annual <- salmon_longer %>%
+  group_by_key() %>% # group by species
+  index_by(yr = ~year(.)) %>% # index by year
+  summarize(annual_count = sum(counts)) %>% # sum counts by year and species
+  mutate(yr = as.Date(ISOdate(yr, 1, 1)))
+
+
+# Using Bri's graph formatting:
+ggplot(data = annual, aes(x = yr, 
+                          y = annual_count, 
+                          color = species)) +
+  geom_line(size=1.25) +
+  labs(x = "Year",
+       y = "Count",
+       title = "Salmon counts at Willamette Falls fish passage by year",
+       subtitle = "2001 - 2010",
+       color = "Species",
+       caption = "Minnie Ringland, 2021\nSource: Columbia River DART") +
+  scale_color_manual(values = c("aquamarine3", "cornflowerblue", "goldenrod1")) + # change colors
+  scale_x_date(date_breaks = "1 year", 
+               date_labels = "%Y") + # show all years in YYYY format
+  theme_minimal() +
+  theme(legend.position = c(0.75, 0.75), # move legend
+        legend.background = element_rect(fill="white", 
+                                         linetype = "solid", 
+                                         color = "whitesmoke"), # format legend
+        axis.text.x = element_text(angle = 45, 
+                                   vjust = 1, 
+                                   hjust = 1))# angle x labels
+  
+```
+
+
+#### Takeaways
+
+* As seen in the original time series, Steelhead were sighted in greater numbers than Coho and Jack Coho most of the study period, suggesting that the population is more abundant or that these fish are easier to count. 
+* Once we aggregate the data by year, there do not appear to be any patterns in terms of cyclicality or trends common across species (The monthly variation within a year is hidden).
+* Within species, Steelhead populations appear to be trending down, while Coho fish were seen in greater abundance over time, particularly in the last two years of the study period, which could suggest a population increase. Jack Coho fish seem to be present in very low numbers with no change over time, which could be cause for concern.
